@@ -1,25 +1,43 @@
 const createProbot = require('..')
 const request = require('supertest')
 
+const sign = require('@octokit/webhooks/sign')
+
+const pushPayload = require('./fixtures/webhook/push')
+const signature = sign('development', pushPayload)
+
 describe('Probot', () => {
   let probot
-  let event
+  let eventMeta
 
   beforeEach(() => {
     probot = createProbot()
 
-    event = {
-      event: 'push',
-      payload: require('./fixtures/webhook/push')
+    eventMeta = {
+      id: '123',
+      name: 'push'
     }
   })
 
   describe('webhook delivery', () => {
     it('forwards webhooks to the robot', async () => {
       const robot = probot.load(() => {})
-      robot.receive = jest.fn()
-      probot.webhook.emit('*', event)
-      expect(robot.receive).toHaveBeenCalledWith(event)
+      const handler = jest.fn()
+      robot.on('push', handler)
+      await request(probot.server)
+        .post('/')
+        .send(pushPayload)
+        .set('content-type', 'application/json')
+        .set('user-agent', 'GitHub-Hookshot/abc4567')
+        .set('x-github-event', 'push')
+        .set('x-hub-signature', signature)
+        .set('x-github-delivery', eventMeta.id)
+        .expect(200)
+
+      expect(handler).toHaveBeenCalledWith(pushPayload, {
+        id: '123',
+        name: 'push'
+      })
     })
   })
 
@@ -40,6 +58,15 @@ describe('Probot', () => {
       })
 
       return request(probot.server).get('/foo').expect(200, 'foo')
+    })
+
+    it('allows custom POST routes', () => {
+      probot.load(robot => {
+        const app = robot.route()
+        app.post('/foo', (req, res) => res.end('foo'))
+      })
+
+      return request(probot.server).post('/foo').expect(200, 'foo')
     })
 
     it('allows you to overwrite the root path', () => {
@@ -112,7 +139,40 @@ describe('Probot', () => {
       const robot = probot.load(robot => robot.on('push', spy))
       robot.auth = jest.fn().mockReturnValue(Promise.resolve({}))
 
-      await probot.receive(event)
+      await probot.receive({
+        id: eventMeta.id,
+        name: eventMeta.name,
+        data: pushPayload,
+        signature: signature
+      })
+
+      expect(spy).toHaveBeenCalled()
+    })
+
+    it('logs errors', async () => {
+      const spy = jest.fn()
+      const robot = probot.load(() => {})
+
+      robot.auth = jest.fn().mockReturnValue(Promise.resolve({}))
+      robot.log.error = jest.fn()
+
+      const error = new Error('testing')
+      robot.on('push', () => {
+        throw error
+      })
+
+      robot.on('error', spy)
+
+      try {
+        await probot.receive({
+          id: eventMeta.id,
+          name: eventMeta.name,
+          data: pushPayload,
+          signature: signature
+        })
+      } catch (error) {
+        // expected
+      }
 
       expect(spy).toHaveBeenCalled()
     })

@@ -2,7 +2,7 @@ const bunyan = require('bunyan')
 const bunyanFormat = require('bunyan-format')
 const sentryStream = require('bunyan-sentry-stream')
 const cacheManager = require('cache-manager')
-const createWebhook = require('github-webhook-handler')
+const Webhooks = require('@octokit/webhooks')
 const Raven = require('raven')
 
 const createApp = require('./lib/github-app')
@@ -32,22 +32,21 @@ const defaultApps = [
 process.on('unhandledRejection', logger.error.bind(logger))
 
 module.exports = (options = {}) => {
-  const webhook = createWebhook({path: options.webhookPath || '/', secret: options.secret || 'development'})
+  const webhooks = new Webhooks({secret: options.secret || 'development'})
   const app = createApp({
     id: options.id,
     cert: options.cert,
     debug: process.env.LOG_LEVEL === 'trace'
   })
-  const server = createServer(webhook)
+  const server = createServer(options, webhooks.middleware)
 
   // Log all received webhooks
-  webhook.on('*', event => {
-    logger.trace(event, 'webhook received')
-    receive(event)
+  webhooks.on('*', (eventName, payload) => {
+    logger.trace(eventName, 'webhook received')
   })
 
   // Log all webhook errors
-  webhook.on('error', logger.error.bind(logger))
+  webhooks.on('error', logger.error.bind(logger))
 
   // If sentry is configured, report all logged errors
   if (process.env.SENTRY_DSN) {
@@ -61,16 +60,12 @@ module.exports = (options = {}) => {
 
   const robots = []
 
-  function receive (event) {
-    return Promise.all(robots.map(robot => robot.receive(event)))
-  }
-
   function load (plugin) {
     if (typeof plugin === 'string') {
       plugin = resolve(plugin)
     }
 
-    const robot = createRobot({app, cache, logger, catchErrors: true})
+    const robot = createRobot({app, cache, logger, webhooks, catchErrors: true})
 
     // Connect the router from the robot to the server
     server.use(robot.router)
@@ -88,11 +83,11 @@ module.exports = (options = {}) => {
 
   return {
     server,
-    webhook,
-    receive,
+    webhook: webhooks,
     logger,
     load,
     setup,
+    receive: webhooks.handle,
 
     start () {
       server.listen(options.port)

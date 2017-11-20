@@ -23,6 +23,7 @@
   "author": "Brandon Keepers",
   "license": "ISC",
   "dependencies": {
+    "@octokit/webhooks": "^1.0.0",
     "bottleneck": "^1.16.0",
     "bunyan": "^1.8.12",
     "bunyan-format": "^0.2.1",
@@ -33,7 +34,6 @@
     "ejs": "^2.5.7",
     "express": "^4.15.4",
     "github": "^10.1.0",
-    "github-webhook-handler": "github:rvagg/github-webhook-handler#v0.6.1",
     "jest": "^21.2.1",
     "js-yaml": "^3.9.1",
     "jsonwebtoken": "^8.1.0",
